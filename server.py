@@ -4,6 +4,7 @@ Interroge l'API publique Omeka S des Thomas A. Edison Papers (Rutgers University
 https://edisondigital.rutgers.edu/api/
 """
 
+import base64
 import json
 import os
 from typing import Optional
@@ -322,6 +323,135 @@ async def edison_browse_series(params: BrowseSeriesInput) -> str:
 
     return "\n".join(lines)
 
+
+
+# ---------------------------------------------------------------------------
+# Outil : récupération des scans (images)
+# ---------------------------------------------------------------------------
+
+class GetImagesInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    callnumber: str = Field(..., description="Cote Edison Papers (ex : 'MU095', 'D8839ACK2')", minlength=3, maxlength=50)
+    pages: Optional[list[int]] = Field(default=None, description="Pages spécifiques à récupérer (1-indexé). Ex: [1, 2]. Si absent, retourne toutes les pages (max 8).")
+
+
+@mcp.tool(
+    name="edison_get_images",
+    annotations={
+        "title": "Récupérer les scans d'un document Edison Papers pour analyse visuelle",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    }
+)
+async def edison_get_images(params: GetImagesInput) -> list:
+    """Récupère les scans haute résolution d'un document Edison Papers et les retourne
+    en base64 pour analyse visuelle directe par Claude.
+
+    Utiliser pour lire le texte original d'un document (lettres manuscrites, contrats,
+    télégrammes), analyser les signatures, les en-têtes, les annotations marginales,
+    ou tout contenu visuel non capturé par la transcription textuelle.
+
+    Args:
+        params: GetImagesInput avec la cote et optionnellement les numéros de pages.
+
+    Returns:
+        list: Contenu mixte — texte de métadonnées + images base64 pour chaque page.
+    """
+    # 1. Récupérer les médias via l'API
+    try:
+        with httpx.Client(timeout=TIMEOUT) as client:
+            # D'abord chercher l'item par cote
+            r = client.get(f"{BASE_URL}/items", params={
+                "fulltext_search": params.callnumber,
+                "per_page": 10,
+            })
+            r.raise_for_status()
+            items = r.json()
+    except httpx.HTTPStatusError as e:
+        return [{"type": "text", "text": f"Erreur API : {e.response.status_code}"}]
+    except httpx.TimeoutException:
+        return [{"type": "text", "text": "Erreur : délai d'attente dépassé."}]
+
+    # Trouver l'item exact
+    target = None
+    for item in items:
+        cotes = [v.get("@value", "") for v in item.get("dcterms:identifier", [])]
+        if params.callnumber.upper() in [c.upper() for c in cotes]:
+            target = item
+            break
+
+    if not target:
+        return [{"type": "text", "text": f"Document '{params.callnumber}' introuvable."}]
+
+    omeka_id = target["o:id"]
+    media_refs = target.get("o:media", [])
+    nb_total = len(media_refs)
+
+    if nb_total == 0:
+        return [{"type": "text", "text": f"Aucun scan disponible pour {params.callnumber}."}]
+
+    # 2. Récupérer les métadonnées des médias
+    try:
+        with httpx.Client(timeout=TIMEOUT) as client:
+            r = client.get(f"{BASE_URL}/media", params={"item_id": omeka_id})
+            r.raise_for_status()
+            media_list = r.json()
+    except Exception as e:
+        return [{"type": "text", "text": f"Erreur récupération médias : {e}"}]
+
+    # 3. Sélectionner les pages
+    if params.pages:
+        selected = [media_list[i - 1] for i in params.pages if 0 < i <= len(media_list)]
+    else:
+        selected = media_list[:8]  # max 8 pages par défaut
+
+    # 4. Télécharger et encoder
+    result = []
+    m = _extract(target)
+    titre = m['titre'] or ''
+    date = m['date'] or 'date inconnue'
+    result.append({
+        "type": "text",
+        "text": (
+            f"## {params.callnumber} — {date}\n"
+            f"**{titre}**\n"
+            f"Pages disponibles : {nb_total} | Pages chargées : {len(selected)}\n"
+        )
+    })
+
+    with httpx.Client(timeout=30.0) as client:
+        for i, media in enumerate(selected, 1):
+            # Essayer original_url d'abord, sinon large thumbnail
+            img_url = media.get("o:original_url") or media.get("o:thumbnail_urls", {}).get("large")
+            if not img_url:
+                continue
+
+            try:
+                resp = client.get(img_url, follow_redirects=True)
+                resp.raise_for_status()
+                content_type = resp.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+                # Normaliser le type MIME
+                if content_type not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
+                    content_type = "image/jpeg"
+                b64 = base64.standard_b64encode(resp.content).decode("utf-8")
+                result.append({
+                    "type": "text",
+                    "text": f"**Page {i}/{len(selected)}** ({img_url.split('/')[-1]})"
+                })
+                result.append({
+                    "type": "image",
+                    "data": b64,
+                    "mimeType": content_type,
+                })
+            except Exception as e:
+                result.append({
+                    "type": "text",
+                    "text": f"Page {i} — erreur de téléchargement : {e}"
+                })
+
+    return result
 
 # ---------------------------------------------------------------------------
 # Point d'entrée
