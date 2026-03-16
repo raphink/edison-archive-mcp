@@ -1,62 +1,60 @@
 # Edison Papers MCP Server
 
-Serveur MCP pour interroger les [Thomas A. Edison Papers](https://edisondigital.rutgers.edu) (Rutgers University) — API publique Omeka S, ~150 000 documents, CC0.
+An MCP server for querying the [Thomas A. Edison Papers](https://edisondigital.rutgers.edu) (Rutgers University) — ~150,000 documents, public domain (CC0).
 
-Fonctionne en deux modes :
-- **stdio** — pour Claude Desktop (local, pas de réseau)
-- **HTTP** — pour Claude.ai (hébergé sur Railway, Render, Fly.io…)
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `edison_search` | Full-text search by keyword, author, or recipient |
+| `edison_get_document` | Fetch full metadata and transcription for a document by call number |
+| `edison_browse_series` | List all documents in an archive series |
 
 ---
 
-## Déploiement Railway (Claude.ai)
+## Use with Claude.ai (hosted)
 
-### Étape 1 — Créer un dépôt GitHub
+Deploy the server online so Claude.ai can connect to it via HTTP.
 
-```bash
-git init
-git add .
-git commit -m "Edison Papers MCP"
-git remote add origin https://github.com/TON_NOM/edison-papers-mcp.git
-git push -u origin main
+### 1. Deploy to Railway (free)
+
+1. Push this repo to GitHub
+2. Go to [railway.app](https://railway.app) → **New Project → Deploy from GitHub repo**
+3. Select your repo, then add this environment variable:
+   ```
+   MCP_TRANSPORT = http
+   ```
+   (`PORT` is set automatically by Railway)
+4. Click **Deploy** (~2 minutes)
+5. Go to **Settings → Networking → Generate Domain** to get your public URL
+
+### 2. Connect to Claude.ai
+
+Go to **Claude.ai → Settings → Integrations → Add custom integration** and enter:
 ```
-
-### Étape 2 — Déployer sur Railway
-
-1. Aller sur [railway.app](https://railway.app) → **New Project → Deploy from GitHub repo**
-2. Sélectionner ton dépôt `edison-papers-mcp`
-3. Dans **Variables**, ajouter : `MCP_TRANSPORT = http`
-   (la variable `PORT` est injectée automatiquement par Railway)
-4. Cliquer **Deploy** — déploiement en ~2 minutes
-
-### Étape 3 — Récupérer l'URL publique
-
-Railway → ton service → **Settings → Networking → Generate Domain**
-
-URL de la forme : `https://edison-papers-mcp-production.up.railway.app`
-
-### Étape 4 — Connecter à Claude.ai
-
-Claude.ai → **Settings → Integrations → Add custom integration** :
-```
-https://edison-papers-mcp-production.up.railway.app/mcp
+https://your-app.up.railway.app/mcp
 ```
 
 ---
 
-## Installation locale (Claude Desktop)
+## Use with Claude Desktop (local)
+
+### 1. Install dependencies
 
 ```bash
-pip install "mcp[cli]" httpx
+pip install -r requirements.txt
 ```
 
-`~/Library/Application Support/Claude/claude_desktop_config.json` :
+### 2. Add to Claude Desktop config
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "edison-papers": {
       "command": "python",
-      "args": ["/chemin/absolu/vers/server.py"]
+      "args": ["/absolute/path/to/server.py"]
     }
   }
 }
@@ -64,22 +62,10 @@ pip install "mcp[cli]" httpx
 
 ---
 
-## Outils
+## Other free hosting options
 
-| Outil | Description |
-|-------|-------------|
-| `edison_search` | Recherche fulltext (nom, cote, sujet…) paginée |
-| `edison_get_document` | Cote → métadonnées + transcription intégrale |
-| `edison_browse_series` | Lister tous les documents d'une série d'archives |
-
----
-
-## Cotes connues — Louis Rau & CCE
-
-| Cote | Date | Description |
-|------|------|-------------|
-| `HX88018B1` | 1888-02-15 | Contrat éclairage Exposition universelle 1889 |
-| `D8839ACK2` | 1888-10-16 | Brevets autrichiens et français |
-| `CE89073`   | 1889-05-13 | Augmentation de capital (7 → 10 M F) |
-| `CE91089`   | 1891-01-13 | Plainte Milan Edison Co. |
-| `D9128AAA`  | 1891-02-19 | Guerre des brevets — Siemens, Rathenau/AEG |
+| Platform | Notes |
+|----------|-------|
+| [Railway](https://railway.app) | $5/month free credit, fast cold starts |
+| [Render](https://render.com) | Always free tier, sleeps after 15 min of inactivity |
+| [Hugging Face Spaces](https://huggingface.co/spaces) | Always-on, requires a `Dockerfile` |
