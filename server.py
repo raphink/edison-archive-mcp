@@ -1,6 +1,6 @@
 """
 Edison Papers MCP Server
-Interroge l'API publique Omeka S des Thomas A. Edison Papers (Rutgers University).
+Queries the public Omeka S API of the Thomas A. Edison Papers (Rutgers University).
 https://edisondigital.rutgers.edu/api/
 """
 
@@ -13,19 +13,19 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field, ConfigDict
 
 # ---------------------------------------------------------------------------
-# Constantes
+# Constants
 # ---------------------------------------------------------------------------
 
 BASE_URL = "https://edisondigital.rutgers.edu/api"
 DOCUMENT_BASE = "https://edisondigital.rutgers.edu/document"
 TIMEOUT = 15.0
 
-# Champs connus à extraire des réponses Omeka S (confirmés sur D8839ACK2)
-# Note : dcterms:abstract contient la transcription intégrale du document
-#        bibo:recipient contient le destinataire (extension BIBO, pas Dublin Core)
+# Known fields to extract from Omeka S responses (confirmed on D8839ACK2)
+# Note: dcterms:abstract contains the full transcription of the document
+#       bibo:recipient contains the recipient (BIBO extension, not Dublin Core)
 
 # ---------------------------------------------------------------------------
-# Serveur
+# Server
 # ---------------------------------------------------------------------------
 
 from mcp.server.fastmcp.server import TransportSecuritySettings
@@ -40,11 +40,11 @@ _transport_security = (
 mcp = FastMCP("edison_papers_mcp", transport_security=_transport_security)
 
 # ---------------------------------------------------------------------------
-# Client HTTP partagé
+# Shared HTTP client
 # ---------------------------------------------------------------------------
 
 def _get(endpoint: str, params: dict) -> dict:
-    """Appel GET synchrone vers l'API Edison Papers."""
+    """Synchronous GET call to the Edison Papers API."""
     with httpx.Client(timeout=TIMEOUT) as client:
         r = client.get(f"{BASE_URL}/{endpoint}", params=params)
         r.raise_for_status()
@@ -53,27 +53,27 @@ def _get(endpoint: str, params: dict) -> dict:
 
 
 def _extract(item: dict) -> dict:
-    """Extrait les champs clés d'un item Omeka S Edison Papers."""
+    """Extracts key fields from an Omeka S Edison Papers item."""
     def get(field: str) -> list[str]:
         return [v.get("@value", v.get("@id", "")) for v in item.get(field, [])]
 
     cote = get("dcterms:identifier")
     return {
         "omeka_id":       item.get("o:id"),
-        "cote":           cote[0] if cote else None,
-        "titre":          get("dcterms:title")[0] if get("dcterms:title") else None,
+        "callnumber":     cote[0] if cote else None,
+        "title":          get("dcterms:title")[0] if get("dcterms:title") else None,
         "date":           get("dcterms:date")[0] if get("dcterms:date") else None,
         "type":           get("dcterms:type")[0] if get("dcterms:type") else None,
-        "createurs":      get("dcterms:creator"),
-        "destinataires":  get("bibo:recipient"),
+        "creators":       get("dcterms:creator"),
+        "recipients":     get("bibo:recipient"),
         "transcription":  get("dcterms:abstract")[0] if get("dcterms:abstract") else None,
-        "sujets":         get("dcterms:subject"),
+        "subjects":       get("dcterms:subject"),
         "relations":      get("dcterms:relation"),
-        "serie":          get("dcterms:isPartOf")[0] if get("dcterms:isPartOf") else None,
+        "series":         get("dcterms:isPartOf")[0] if get("dcterms:isPartOf") else None,
         "source_microfilm": get("dcterms:source")[0] if get("dcterms:source") else None,
         "archive_org":    get("dcterms:hasVersion")[0] if get("dcterms:hasVersion") else None,
-        "licence":        get("dcterms:license")[0] if get("dcterms:license") else None,
-        "url_web":        f"{DOCUMENT_BASE}/{cote[0]}" if cote else None,
+        "license":        get("dcterms:license")[0] if get("dcterms:license") else None,
+        "web_url":        f"{DOCUMENT_BASE}/{cote[0]}" if cote else None,
         "thumbnail":      item.get("thumbnail_display_urls", {}).get("large"),
         "nb_scans":       len(item.get("o:media", [])),
         "item_set_id":    item["o:item_set"][0]["o:id"] if item.get("o:item_set") else None,
@@ -81,17 +81,17 @@ def _extract(item: dict) -> dict:
 
 
 def _fmt_item(m: dict, include_transcription: bool = False) -> str:
-    """Formate un item extrait en Markdown lisible."""
+    """Formats an extracted item as readable Markdown."""
     lines = [
-        f"### {m['cote']} — {m['date'] or 'date inconnue'}",
-        f"**Titre** : {m['titre']}",
+        f"### {m['callnumber']} — {m['date'] or 'unknown date'}",
+        f"**Title** : {m['title']}",
         f"**Type** : {m['type']}",
-        f"**De** : {', '.join(m['createurs']) or '—'}",
-        f"**À** : {', '.join(m['destinataires']) or '—'}",
-        f"**Sujets** : {', '.join(m['sujets']) or '—'}",
-        f"**Série** : {m['serie'] or '—'}",
+        f"**From** : {', '.join(m['creators']) or '—'}",
+        f"**To** : {', '.join(m['recipients']) or '—'}",
+        f"**Subjects** : {', '.join(m['subjects']) or '—'}",
+        f"**Series** : {m['series'] or '—'}",
         f"**Scans** : {m['nb_scans']} page(s)",
-        f"**URL** : {m['url_web']}",
+        f"**URL** : {m['web_url']}",
     ]
     if m.get("archive_org"):
         lines.append(f"**Archive.org** : {m['archive_org']}")
@@ -101,24 +101,24 @@ def _fmt_item(m: dict, include_transcription: bool = False) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Outils
+# Tools
 # ---------------------------------------------------------------------------
 
 class SearchInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    query: Optional[str] = Field(default=None, description="Texte libre à rechercher. Ex : 'D8839ACK2', 'incandescent lamp'. Laisser vide si on filtre uniquement par creator/recipient.", max_length=200)
-    creator: Optional[str] = Field(default=None, description="Filtrer par expéditeur/auteur exact. Ex : 'Rau, Louis', 'Compagnie Continentale Edison'", max_length=200)
-    recipient: Optional[str] = Field(default=None, description="Filtrer par destinataire exact. Ex : 'Edison, Thomas Alva', 'Edison Electric Light Co of Europe Ltd'", max_length=200)
-    per_page: Optional[int] = Field(default=20, description="Nombre de résultats par page (1-100)", ge=1, le=100)
-    page: Optional[int] = Field(default=1, description="Numéro de page pour la pagination", ge=1)
-    sort_by: Optional[str] = Field(default="dcterms:date", description="Champ de tri. Options : 'dcterms:date', 'dcterms:title', 'o:id'")
-    sort_order: Optional[str] = Field(default="asc", description="Ordre de tri : 'asc' ou 'desc'")
+    query: Optional[str] = Field(default=None, description="Free-text search query. E.g.: 'D8839ACK2', 'incandescent lamp'. Leave empty to filter by creator/recipient only.", max_length=200)
+    creator: Optional[str] = Field(default=None, description="Filter by exact sender/author. E.g.: 'Rau, Louis', 'Compagnie Continentale Edison'", max_length=200)
+    recipient: Optional[str] = Field(default=None, description="Filter by exact recipient. E.g.: 'Edison, Thomas Alva', 'Edison Electric Light Co of Europe Ltd'", max_length=200)
+    per_page: Optional[int] = Field(default=20, description="Number of results per page (1-100)", ge=1, le=100)
+    page: Optional[int] = Field(default=1, description="Page number for pagination", ge=1)
+    sort_by: Optional[str] = Field(default="dcterms:date", description="Sort field. Options: 'dcterms:date', 'dcterms:title', 'o:id'")
+    sort_order: Optional[str] = Field(default="asc", description="Sort order: 'asc' or 'desc'")
 
 
 @mcp.tool(
     name="edison_search",
     annotations={
-        "title": "Recherche dans les Edison Papers",
+        "title": "Search the Edison Papers",
         "readOnlyHint": True,
         "destructiveHint": False,
         "idempotentHint": True,
@@ -126,23 +126,23 @@ class SearchInput(BaseModel):
     }
 )
 async def edison_search(params: SearchInput) -> str:
-    """Recherche dans les Edison Papers (Rutgers University).
+    """Search the Edison Papers (Rutgers University).
 
-    Supporte deux modes de recherche complémentaires :
-    - fulltext (query) : recherche dans toutes les métadonnées, large mais imprécis
-    - filtres exacts (creator, recipient) : filtre sur le champ Dublin Core exact, bien plus précis
+    Supports two complementary search modes:
+    - fulltext (query): searches all metadata, broad but less precise
+    - exact filters (creator, recipient): filters on the exact Dublin Core field, much more precise
 
-    Pour Louis Rau, utiliser creator='Rau, Louis' plutôt que query='Louis Rau'.
-    Les deux filtres peuvent être combinés.
+    For Louis Rau, use creator='Rau, Louis' rather than query='Louis Rau'.
+    Both filters can be combined.
 
     Args:
-        params: SearchInput avec query optionnel, creator, recipient, per_page, page, sort_by, sort_order.
+        params: SearchInput with optional query, creator, recipient, per_page, page, sort_by, sort_order.
 
     Returns:
-        str: Liste Markdown des documents trouvés avec total, pagination, et métadonnées.
+        str: Markdown list of found documents with total, pagination, and metadata.
     """
     if not params.query and not params.creator and not params.recipient:
-        return "Erreur : fournir au moins un critère de recherche (query, creator, ou recipient)."
+        return "Error: provide at least one search criterion (query, creator, or recipient)."
 
     api_params: dict = {
         "per_page": params.per_page,
@@ -154,7 +154,7 @@ async def edison_search(params: SearchInput) -> str:
     if params.query:
         api_params["fulltext_search"] = params.query
 
-    # Filtres par propriété Dublin Core (syntaxe Omeka S)
+    # Dublin Core property filters (Omeka S syntax)
     prop_index = 0
     if params.creator:
         api_params[f"property[{prop_index}][property]"] = "dcterms:creator"
@@ -171,20 +171,20 @@ async def edison_search(params: SearchInput) -> str:
     try:
         result = _get("items", api_params)
     except httpx.HTTPStatusError as e:
-        return f"Erreur API Edison Papers : {e.response.status_code}"
+        return f"Edison Papers API error: {e.response.status_code}"
     except httpx.TimeoutException:
-        return "Erreur : délai d'attente dépassé. Réessayer."
+        return "Error: request timed out. Please try again."
 
     items = result["items"]
     total = result["total"] or "?"
 
     label = params.query or params.creator or params.recipient
     if not items:
-        return f"Aucun résultat pour « {label} »."
+        return f"No results for « {label} »."
 
     lines = [
-        f"## Résultats Edison Papers : « {label} »",
-        f"**{total} documents** trouvés — page {params.page} ({len(items)} affichés)\n",
+        f"## Edison Papers results: « {label} »",
+        f"**{total} documents** found — page {params.page} ({len(items)} shown)\n",
     ]
     for item in items:
         m = _extract(item)
@@ -193,7 +193,7 @@ async def edison_search(params: SearchInput) -> str:
 
     has_more = len(items) == params.per_page
     if has_more:
-        lines.append(f"*→ Page suivante : utiliser page={params.page + 1}*")
+        lines.append(f"*→ Next page: use page={params.page + 1}*")
 
     return "\n".join(lines)
 
@@ -202,13 +202,13 @@ async def edison_search(params: SearchInput) -> str:
 
 class GetDocumentInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    callnumber: str = Field(..., description="Cote Edison Papers (ex : 'D8839ACK2', 'CE89073', 'HX88018B1')", min_length=3, max_length=50)
+    callnumber: str = Field(..., description="Edison Papers call number (e.g.: 'D8839ACK2', 'CE89073', 'HX88018B1')", min_length=3, max_length=50)
 
 
 @mcp.tool(
     name="edison_get_document",
     annotations={
-        "title": "Récupérer un document Edison Papers par sa cote",
+        "title": "Retrieve an Edison Papers document by call number",
         "readOnlyHint": True,
         "destructiveHint": False,
         "idempotentHint": True,
@@ -216,16 +216,16 @@ class GetDocumentInput(BaseModel):
     }
 )
 async def edison_get_document(params: GetDocumentInput) -> str:
-    """Récupère les métadonnées complètes et la transcription d'un document par sa cote.
+    """Retrieves the full metadata and transcription of a document by its call number.
 
-    La transcription intégrale du document (texte de la lettre, du contrat, etc.)
-    est disponible dans le champ dcterms:abstract de l'API Edison Papers.
+    The full transcription of the document (text of the letter, contract, etc.)
+    is available in the dcterms:abstract field of the Edison Papers API.
 
     Args:
-        params: GetDocumentInput avec la cote du document (ex : 'D8839ACK2').
+        params: GetDocumentInput with the document call number (e.g.: 'D8839ACK2').
 
     Returns:
-        str: Métadonnées complètes + transcription intégrale du document en Markdown.
+        str: Full metadata + complete transcription of the document in Markdown.
     """
     try:
         result = _get("items", {
@@ -233,11 +233,11 @@ async def edison_get_document(params: GetDocumentInput) -> str:
             "per_page": 10,
         })
     except httpx.HTTPStatusError as e:
-        return f"Erreur API Edison Papers : {e.response.status_code}"
+        return f"Edison Papers API error: {e.response.status_code}"
     except httpx.TimeoutException:
-        return "Erreur : délai d'attente dépassé."
+        return "Error: request timed out."
 
-    # Trouver l'item exact par cote
+    # Find the exact item by call number
     target = None
     for item in result["items"]:
         cotes = [v.get("@value", "") for v in item.get("dcterms:identifier", [])]
@@ -247,8 +247,8 @@ async def edison_get_document(params: GetDocumentInput) -> str:
 
     if not target:
         return (
-            f"Document « {params.callnumber} » introuvable.\n"
-            f"Vérifier la cote ou essayer edison_search('{params.callnumber}')."
+            f"Document '{params.callnumber}' not found.\n"
+            f"Check the call number or try edison_search('{params.callnumber}')."
         )
 
     m = _extract(target)
@@ -259,15 +259,15 @@ async def edison_get_document(params: GetDocumentInput) -> str:
 
 class BrowseSeriesInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    item_set_id: int = Field(..., description="ID Omeka de la série (item set). Obtenir via edison_search puis champ item_set_id.", ge=1)
-    per_page: Optional[int] = Field(default=50, description="Nombre de documents à lister (1-100)", ge=1, le=100)
-    page: Optional[int] = Field(default=1, description="Numéro de page", ge=1)
+    item_set_id: int = Field(..., description="Omeka ID of the series (item set). Obtain via edison_search then the item_set_id field.", ge=1)
+    per_page: Optional[int] = Field(default=50, description="Number of documents to list (1-100)", ge=1, le=100)
+    page: Optional[int] = Field(default=1, description="Page number", ge=1)
 
 
 @mcp.tool(
     name="edison_browse_series",
     annotations={
-        "title": "Parcourir une série d'archives Edison Papers",
+        "title": "Browse an Edison Papers archive series",
         "readOnlyHint": True,
         "destructiveHint": False,
         "idempotentHint": True,
@@ -275,17 +275,17 @@ class BrowseSeriesInput(BaseModel):
     }
 )
 async def edison_browse_series(params: BrowseSeriesInput) -> str:
-    """Liste tous les documents d'une série (item set) Edison Papers.
+    """Lists all documents in an Edison Papers series (item set).
 
-    Utile pour explorer tous les documents d'un dossier d'archives (ex : tous
-    les documents de la série D8839-F). L'item_set_id s'obtient via le champ
-    'item_set_id' retourné par edison_search ou edison_get_document.
+    Useful for exploring all documents in an archive folder (e.g.: all
+    documents in the D8839-F series). The item_set_id is obtained via the
+    'item_set_id' field returned by edison_search or edison_get_document.
 
     Args:
-        params: BrowseSeriesInput avec item_set_id, per_page, page.
+        params: BrowseSeriesInput with item_set_id, per_page, page.
 
     Returns:
-        str: Liste Markdown des documents de la série avec métadonnées.
+        str: Markdown list of documents in the series with metadata.
     """
     try:
         result = _get("items", {
@@ -296,58 +296,58 @@ async def edison_browse_series(params: BrowseSeriesInput) -> str:
             "sort_order": "asc",
         })
     except httpx.HTTPStatusError as e:
-        return f"Erreur API Edison Papers : {e.response.status_code}"
+        return f"Edison Papers API error: {e.response.status_code}"
     except httpx.TimeoutException:
-        return "Erreur : délai d'attente dépassé."
+        return "Error: request timed out."
 
     items = result["items"]
     total = result["total"] or "?"
 
     if not items:
-        return f"Aucun document dans la série {params.item_set_id}."
+        return f"No documents in series {params.item_set_id}."
 
-    # Récupérer le nom de la série depuis le premier item
-    serie_name = None
+    # Retrieve the series name from the first item
+    series_name = None
     if items:
         first = _extract(items[0])
-        serie_name = first.get("serie")
+        series_name = first.get("series")
 
     lines = [
-        f"## Série Edison Papers — item set {params.item_set_id}",
-        f"**{serie_name or 'Série inconnue'}**",
-        f"**{total} documents** — page {params.page} ({len(items)} affichés)\n",
+        f"## Edison Papers series — item set {params.item_set_id}",
+        f"**{series_name or 'Unknown series'}**",
+        f"**{total} documents** — page {params.page} ({len(items)} shown)\n",
     ]
     for item in items:
         m = _extract(item)
-        createurs = ", ".join(m["createurs"]) if m["createurs"] else "—"
-        destinataires = ", ".join(m["destinataires"]) if m["destinataires"] else "—"
+        creators = ", ".join(m["creators"]) if m["creators"] else "—"
+        recipients = ", ".join(m["recipients"]) if m["recipients"] else "—"
         lines.append(
-            f"- **{m['cote']}** ({m['date'] or '?'}) — {m['type'] or '?'} "
-            f"| De : {createurs} → {destinataires}"
+            f"- **{m['callnumber']}** ({m['date'] or '?'}) — {m['type'] or '?'} "
+            f"| From: {creators} → {recipients}"
         )
 
     has_more = len(items) == params.per_page
     if has_more:
-        lines.append(f"\n*→ Page suivante : utiliser page={params.page + 1}*")
+        lines.append(f"\n*→ Next page: use page={params.page + 1}*")
 
     return "\n".join(lines)
 
 
 
 # ---------------------------------------------------------------------------
-# Outil : récupération des scans (images)
+# Tool: scan retrieval (images)
 # ---------------------------------------------------------------------------
 
 class GetImagesInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    callnumber: str = Field(..., description="Cote Edison Papers (ex : 'MU095', 'D8839ACK2')", minlength=3, maxlength=50)
-    pages: Optional[list[int]] = Field(default=None, description="Pages spécifiques à récupérer (1-indexé). Ex: [1, 2]. Si absent, retourne toutes les pages (max 8).")
+    callnumber: str = Field(..., description="Edison Papers call number (e.g.: 'MU095', 'D8839ACK2')", minlength=3, maxlength=50)
+    pages: Optional[list[int]] = Field(default=None, description="Specific pages to retrieve (1-indexed). E.g.: [1, 2]. If absent, returns all pages (max 8).")
 
 
 @mcp.tool(
     name="edison_get_images",
     annotations={
-        "title": "Récupérer les scans d'un document Edison Papers pour analyse visuelle",
+        "title": "Retrieve scans of an Edison Papers document for visual analysis",
         "readOnlyHint": True,
         "destructiveHint": False,
         "idempotentHint": True,
@@ -355,23 +355,23 @@ class GetImagesInput(BaseModel):
     }
 )
 async def edison_get_images(params: GetImagesInput) -> list:
-    """Récupère les scans haute résolution d'un document Edison Papers et les retourne
-    en base64 pour analyse visuelle directe par Claude.
+    """Retrieves high-resolution scans of an Edison Papers document and returns them
+    as base64 for direct visual analysis by Claude.
 
-    Utiliser pour lire le texte original d'un document (lettres manuscrites, contrats,
-    télégrammes), analyser les signatures, les en-têtes, les annotations marginales,
-    ou tout contenu visuel non capturé par la transcription textuelle.
+    Use this to read the original text of a document (handwritten letters, contracts,
+    telegrams), analyze signatures, letterheads, marginal annotations,
+    or any visual content not captured by the text transcription.
 
     Args:
-        params: GetImagesInput avec la cote et optionnellement les numéros de pages.
+        params: GetImagesInput with the call number and optionally page numbers.
 
     Returns:
-        list: Contenu mixte — texte de métadonnées + images base64 pour chaque page.
+        list: Mixed content — metadata text + base64 images for each page.
     """
-    # 1. Récupérer les médias via l'API
+    # 1. Retrieve media via the API
     try:
         with httpx.Client(timeout=TIMEOUT) as client:
-            # D'abord chercher l'item par cote
+            # First search for the item by call number
             r = client.get(f"{BASE_URL}/items", params={
                 "fulltext_search": params.callnumber,
                 "per_page": 10,
@@ -379,11 +379,11 @@ async def edison_get_images(params: GetImagesInput) -> list:
             r.raise_for_status()
             items = r.json()
     except httpx.HTTPStatusError as e:
-        return [{"type": "text", "text": f"Erreur API : {e.response.status_code}"}]
+        return [{"type": "text", "text": f"API error: {e.response.status_code}"}]
     except httpx.TimeoutException:
-        return [{"type": "text", "text": "Erreur : délai d'attente dépassé."}]
+        return [{"type": "text", "text": "Error: request timed out."}]
 
-    # Trouver l'item exact
+    # Find the exact item
     target = None
     for item in items:
         cotes = [v.get("@value", "") for v in item.get("dcterms:identifier", [])]
@@ -392,47 +392,47 @@ async def edison_get_images(params: GetImagesInput) -> list:
             break
 
     if not target:
-        return [{"type": "text", "text": f"Document '{params.callnumber}' introuvable."}]
+        return [{"type": "text", "text": f"Document '{params.callnumber}' not found."}]
 
     omeka_id = target["o:id"]
     media_refs = target.get("o:media", [])
     nb_total = len(media_refs)
 
     if nb_total == 0:
-        return [{"type": "text", "text": f"Aucun scan disponible pour {params.callnumber}."}]
+        return [{"type": "text", "text": f"No scans available for {params.callnumber}."}]
 
-    # 2. Récupérer les métadonnées des médias
+    # 2. Retrieve media metadata
     try:
         with httpx.Client(timeout=TIMEOUT) as client:
             r = client.get(f"{BASE_URL}/media", params={"item_id": omeka_id})
             r.raise_for_status()
             media_list = r.json()
     except Exception as e:
-        return [{"type": "text", "text": f"Erreur récupération médias : {e}"}]
+        return [{"type": "text", "text": f"Error retrieving media: {e}"}]
 
-    # 3. Sélectionner les pages
+    # 3. Select pages
     if params.pages:
         selected = [media_list[i - 1] for i in params.pages if 0 < i <= len(media_list)]
     else:
-        selected = media_list[:8]  # max 8 pages par défaut
+        selected = media_list[:8]  # max 8 pages by default
 
-    # 4. Télécharger et encoder
+    # 4. Download and encode
     result = []
     m = _extract(target)
-    titre = m['titre'] or ''
-    date = m['date'] or 'date inconnue'
+    title = m['title'] or ''
+    date = m['date'] or 'unknown date'
     result.append({
         "type": "text",
         "text": (
             f"## {params.callnumber} — {date}\n"
-            f"**{titre}**\n"
-            f"Pages disponibles : {nb_total} | Pages chargées : {len(selected)}\n"
+            f"**{title}**\n"
+            f"Available pages: {nb_total} | Loaded pages: {len(selected)}\n"
         )
     })
 
     with httpx.Client(timeout=30.0) as client:
         for i, media in enumerate(selected, 1):
-            # Essayer original_url d'abord, sinon large thumbnail
+            # Try original_url first, then large thumbnail
             img_url = media.get("o:original_url") or media.get("o:thumbnail_urls", {}).get("large")
             if not img_url:
                 continue
@@ -441,7 +441,7 @@ async def edison_get_images(params: GetImagesInput) -> list:
                 resp = client.get(img_url, follow_redirects=True)
                 resp.raise_for_status()
                 content_type = resp.headers.get("content-type", "image/jpeg").split(";")[0].strip()
-                # Normaliser le type MIME
+                # Normalize MIME type
                 if content_type not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
                     content_type = "image/jpeg"
                 b64 = base64.standard_b64encode(resp.content).decode("utf-8")
@@ -457,20 +457,20 @@ async def edison_get_images(params: GetImagesInput) -> list:
             except Exception as e:
                 result.append({
                     "type": "text",
-                    "text": f"Page {i} — erreur de téléchargement : {e}"
+                    "text": f"Page {i} — download error: {e}"
                 })
 
     return result
 
 # ---------------------------------------------------------------------------
-# Point d'entrée
+# Entry point
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
     if transport == "http":
         port = int(os.environ.get("PORT", 8000))
-        print(f"Edison Papers MCP — HTTP sur port {port}", flush=True)
+        print(f"Edison Papers MCP — HTTP on port {port}", flush=True)
         mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
     else:
         mcp.run()
