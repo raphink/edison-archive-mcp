@@ -28,16 +28,7 @@ TIMEOUT = 15.0
 # Server
 # ---------------------------------------------------------------------------
 
-from mcp.server.fastmcp.server import TransportSecuritySettings
-
-_allowed_hosts = [h for h in os.environ.get("MCP_ALLOWED_HOSTS", "").split(",") if h]
-_transport_security = (
-    TransportSecuritySettings(allowed_hosts=_allowed_hosts)
-    if _allowed_hosts
-    else None
-)
-
-mcp = FastMCP("edison_papers_mcp", transport_security=_transport_security)
+mcp = FastMCP("edison_papers_mcp", host="0.0.0.0")
 
 # ---------------------------------------------------------------------------
 # Shared HTTP client
