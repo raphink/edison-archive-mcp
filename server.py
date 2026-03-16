@@ -28,7 +28,7 @@ TIMEOUT = 15.0
 # Server
 # ---------------------------------------------------------------------------
 
-mcp = FastMCP("edison_papers_mcp", host="0.0.0.0")
+mcp = FastMCP("edison_papers_mcp", host="0.0.0.0", stateless_http=True)
 
 # ---------------------------------------------------------------------------
 # Shared HTTP client
