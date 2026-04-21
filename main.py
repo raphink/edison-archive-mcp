@@ -1,3 +1,4 @@
+import hmac
 import os
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -22,8 +23,14 @@ class TokenAuthMiddleware(BaseHTTPMiddleware):
         if _SECRET:
             path = request.url.path
             if not any(path.startswith(p) for p in _PUBLIC_PREFIXES):
-                token = request.query_params.get("token", "")
-                if token != _SECRET:
+                # Accept token via Authorization: Bearer header (preferred)
+                # or ?token= query param (fallback for MCP clients).
+                auth = request.headers.get("authorization", "")
+                if auth.lower().startswith("bearer "):
+                    token = auth[7:]
+                else:
+                    token = request.query_params.get("token", "")
+                if not hmac.compare_digest(token, _SECRET):
                     return Response("Unauthorized", status_code=401)
         return await call_next(request)
 

@@ -5,9 +5,8 @@ https://edisondigital.rutgers.edu/api/
 """
 
 import base64
-import json
 import os
-from typing import Optional
+from typing import Literal, Optional
 import httpx
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field, ConfigDict
@@ -34,10 +33,10 @@ mcp = FastMCP("edison_papers_mcp", host="0.0.0.0", stateless_http=True)
 # Shared HTTP client
 # ---------------------------------------------------------------------------
 
-def _get(endpoint: str, params: dict) -> dict:
-    """Synchronous GET call to the Edison Papers API."""
-    with httpx.Client(timeout=TIMEOUT) as client:
-        r = client.get(f"{BASE_URL}/{endpoint}", params=params)
+async def _get(endpoint: str, params: dict) -> dict:
+    """Async GET call to the Edison Papers API."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        r = await client.get(f"{BASE_URL}/{endpoint}", params=params)
         r.raise_for_status()
         total = r.headers.get("Omeka-S-Total-Results")
         return {"items": r.json(), "total": total}
@@ -102,8 +101,8 @@ class SearchInput(BaseModel):
     recipient: Optional[str] = Field(default=None, description="Filter by exact recipient. E.g.: 'Edison, Thomas Alva', 'Edison Electric Light Co of Europe Ltd'", max_length=200)
     per_page: Optional[int] = Field(default=20, description="Number of results per page (1-100)", ge=1, le=100)
     page: Optional[int] = Field(default=1, description="Page number for pagination", ge=1)
-    sort_by: Optional[str] = Field(default="dcterms:date", description="Sort field. Options: 'dcterms:date', 'dcterms:title', 'o:id'")
-    sort_order: Optional[str] = Field(default="asc", description="Sort order: 'asc' or 'desc'")
+    sort_by: Optional[Literal["dcterms:date", "dcterms:title", "o:id"]] = Field(default="dcterms:date", description="Sort field.")
+    sort_order: Optional[Literal["asc", "desc"]] = Field(default="asc", description="Sort order.")
 
 
 @mcp.tool(
@@ -160,7 +159,7 @@ async def edison_search(params: SearchInput) -> str:
         prop_index += 1
 
     try:
-        result = _get("items", api_params)
+        result = await _get("items", api_params)
     except httpx.HTTPStatusError as e:
         return f"Edison Papers API error: {e.response.status_code}"
     except httpx.TimeoutException:
@@ -219,7 +218,7 @@ async def edison_get_document(params: GetDocumentInput) -> str:
         str: Full metadata + complete transcription of the document in Markdown.
     """
     try:
-        result = _get("items", {
+        result = await _get("items", {
             "fulltext_search": params.callnumber,
             "per_page": 10,
         })
@@ -279,7 +278,7 @@ async def edison_browse_series(params: BrowseSeriesInput) -> str:
         str: Markdown list of documents in the series with metadata.
     """
     try:
-        result = _get("items", {
+        result = await _get("items", {
             "item_set_id": params.item_set_id,
             "per_page": params.per_page,
             "page": params.page,
@@ -331,7 +330,7 @@ async def edison_browse_series(params: BrowseSeriesInput) -> str:
 
 class GetImagesInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    callnumber: str = Field(..., description="Edison Papers call number (e.g.: 'MU095', 'D8839ACK2')", minlength=3, maxlength=50)
+    callnumber: str = Field(..., description="Edison Papers call number (e.g.: 'MU095', 'D8839ACK2')", min_length=3, max_length=50)
     pages: Optional[list[int]] = Field(default=None, description="Specific pages to retrieve (1-indexed). E.g.: [1, 2]. If absent, returns all pages (max 8).")
 
 
@@ -361,9 +360,9 @@ async def edison_get_images(params: GetImagesInput) -> list:
     """
     # 1. Retrieve media via the API
     try:
-        with httpx.Client(timeout=TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             # First search for the item by call number
-            r = client.get(f"{BASE_URL}/items", params={
+            r = await client.get(f"{BASE_URL}/items", params={
                 "fulltext_search": params.callnumber,
                 "per_page": 10,
             })
@@ -394,8 +393,8 @@ async def edison_get_images(params: GetImagesInput) -> list:
 
     # 2. Retrieve media metadata
     try:
-        with httpx.Client(timeout=TIMEOUT) as client:
-            r = client.get(f"{BASE_URL}/media", params={"item_id": omeka_id})
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            r = await client.get(f"{BASE_URL}/media", params={"item_id": omeka_id})
             r.raise_for_status()
             media_list = r.json()
     except Exception as e:
@@ -421,7 +420,7 @@ async def edison_get_images(params: GetImagesInput) -> list:
         )
     })
 
-    with httpx.Client(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         for i, media in enumerate(selected, 1):
             # Try original_url first, then large thumbnail
             img_url = media.get("o:original_url") or media.get("o:thumbnail_urls", {}).get("large")
@@ -429,7 +428,7 @@ async def edison_get_images(params: GetImagesInput) -> list:
                 continue
 
             try:
-                resp = client.get(img_url, follow_redirects=True)
+                resp = await client.get(img_url, follow_redirects=True)
                 resp.raise_for_status()
                 content_type = resp.headers.get("content-type", "image/jpeg").split(";")[0].strip()
                 # Normalize MIME type
